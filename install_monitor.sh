@@ -1,93 +1,23 @@
 #!/bin/bash
 
-# 更新系统
-echo "更新系统..."
-sudo apt update && sudo apt upgrade -y
+# 定义流量阈值：4TB = 4 * 1024 * 1024 * 1024 MB
+THRESHOLD=$((4 * 1024 * 1024 * 1024))  # 4TB in MB
 
-# 安装必要的软件包
-echo "安装vnstat和cron..."
-sudo apt install -y vnstat cron
+# 获取所有活动的网卡（忽略回环接口）
+INTERFACE=$(ip -o link show | grep -v lo | awk -F': ' '{print $2}')
 
-# 动态检测网卡名称
-echo "检测网络接口..."
-INTERFACE=$(ip route | grep default | awk '{print $5}')
-if [ -z "$INTERFACE" ]; then
-    echo "未找到有效的网络接口，请手动设置！"
-    exit 1
-fi
-echo "检测到网络接口：$INTERFACE"
+# 获取当前流量：使用vnstat或ifstat
+# 确保系统已安装 vnstat
+# 获取指定网卡的已用流量（单位为字节）
+CURRENT_USAGE=$(vnstat -i $INTERFACE --json | jq '.interfaces[0].traffic.total.rx.bytes + .interfaces[0].traffic.total.tx.bytes')
 
-# 启动vnstat服务
-echo "启动vnstat服务..."
-sudo systemctl enable vnstat
-sudo systemctl start vnstat
+# 如果没有安装 vnstat, 可以使用 ifstat 作为替代
+# CURRENT_USAGE=$(ifstat -i $INTERFACE 1 1 | tail -n 1 | awk '{print $1 + $2}')
 
-# 配置vnstat获取接口
-echo "配置vnstat，初始化网络接口 $INTERFACE..."
-sudo vnstat --create -i $INTERFACE 2>/dev/null
-sudo systemctl restart vnstat
-
-# 日志文件路径
-LOG_FILE="/var/log/traffic_monitor.log"
-
-# 确保日志文件存在
-if [ ! -f "$LOG_FILE" ]; then
-    touch "$LOG_FILE"
-    chmod 644 "$LOG_FILE"  # 设置适当的权限
-fi
-
-# 创建流量监控脚本
-echo "创建流量监控脚本..."
-cat > /usr/local/bin/check_traffic.sh << EOF
-#!/bin/bash
-
-# 日志文件路径
-LOG_FILE="/var/log/traffic_monitor.log"
-
-# 确保日志文件存在
-if [ ! -f "\$LOG_FILE" ]; then
-    touch "\$LOG_FILE"
-    chmod 644 "\$LOG_FILE"  # 设置适当的权限
-fi
-
-# 动态检测网络接口
-INTERFACE=\$(ip route | grep default | awk '{print \$5}')
-
-# 获取当前月份的总流量（单位：MiB）
-total_usage=$(vnstat -i $INTERFACE -m | grep "$(date +'%b')" | awk '{print $2}' | sed 's/[^0-9]*//g' | tr -d '[:space:]')
-
-# 打印调试信息
-echo "获取的总流量: $total_usage"
-
-# 如果获取的流量为空或不是有效的整数，则记录错误日志并退出
-if [ -z "$total_usage" ] || ! [[ "$total_usage" =~ ^[0-9]+$ ]]; then
-    echo "$(date): 无法获取流量数据，获取到的值为：$total_usage，请检查vnstat配置或接口名称！" >> $LOG_FILE
-    exit 1
-fi
-
-
-# 将5TB转换为MiB (5TB = 5000GB = 5000000MB = 5000000 / 1.048576 MiB)
-threshold=5000000
-
-# 判断流量是否超过流量阈值
-if [ "\$total_usage" -ge "\$threshold" ]; then
-    echo "\$(date): 总流量已超过5TB，系统即将关机！" >> \$LOG_FILE
+# 检查流量是否超过阈值
+if [ $CURRENT_USAGE -gt $THRESHOLD ]; then
+    echo "流量超过 4TB, 正在关闭服务器..."
     sudo shutdown -h now
 else
-    echo "\$(date): 当前总流量：\$total_usage MiB，未超过5TB" >> \$LOG_FILE
+    echo "当前流量：$CURRENT_USAGE 字节，未超过阈值，继续运行..."
 fi
-EOF
-
-# 赋予脚本执行权限
-sudo chmod +x /usr/local/bin/check_traffic.sh
-
-# 设置定时任务，每小时执行一次脚本
-echo "配置定时任务，每小时检查一次流量..."
-(crontab -l 2>/dev/null; echo "0 * * * * /usr/local/bin/check_traffic.sh") | crontab -
-
-# 每月1号重置vnstat的流量统计
-echo "配置每月1号重置流量统计..."
-(crontab -l 2>/dev/null; echo "0 0 1 * * vnstat --reset -i $INTERFACE") | crontab -
-
-# 输出安装完成信息
-echo "安装完成！系统已配置好流量监控，并且会每小时检查流量是否超过5TB。"
