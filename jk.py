@@ -18,7 +18,7 @@ def extract_total_data(vnstat_output):
     match = re.search(pattern, vnstat_output)
     
     if match:
-        return match.group(1)  # 提取出总数据值（例如 69.21）
+        return float(match.group(1))  # 提取出总数据值并转换为浮动数字
     return None
 
 # 将提取的总数据写入到文件
@@ -30,6 +30,14 @@ def write_to_file(total_data, file_path="/root/jk/jk.txt"):
     except Exception as e:
         print(f"无法写入文件: {e}")
 
+# 执行关机操作
+def shutdown_system():
+    try:
+        print("总数据超过阈值，正在关机...")
+        subprocess.run(['sudo', 'shutdown', '-h', 'now'])
+    except Exception as e:
+        print(f"关机时发生错误: {e}")
+
 # 主程序
 def main():
     vnstat_output = get_vnstat_output()
@@ -38,7 +46,16 @@ def main():
         total_data = extract_total_data(vnstat_output)
         
         if total_data:
-            write_to_file(total_data)
+            write_to_file(total_data)  # 写入文件
+            
+            threshold = 3814697.27  # 设置阈值（MiB）
+            print(f"当前总数据: {total_data} MiB")
+            
+            # 判断是否超过阈值
+            if total_data > threshold:
+                shutdown_system()  # 超过阈值时关机
+            else:
+                print(f"当前总数据 {total_data} MiB, 未超过阈值 {threshold} MiB")
         else:
             print("未找到匹配的总数据")
     else:
