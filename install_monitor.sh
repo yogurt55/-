@@ -27,10 +27,28 @@ echo "配置vnstat，初始化网络接口 $INTERFACE..."
 sudo vnstat --create -i $INTERFACE 2>/dev/null
 sudo systemctl restart vnstat
 
+# 日志文件路径
+LOG_FILE="/var/log/traffic_monitor.log"
+
+# 确保日志文件存在
+if [ ! -f "$LOG_FILE" ]; then
+    touch "$LOG_FILE"
+    chmod 644 "$LOG_FILE"  # 设置适当的权限
+fi
+
 # 创建流量监控脚本
 echo "创建流量监控脚本..."
 cat > /usr/local/bin/check_traffic.sh << EOF
 #!/bin/bash
+
+# 日志文件路径
+LOG_FILE="/var/log/traffic_monitor.log"
+
+# 确保日志文件存在
+if [ ! -f "\$LOG_FILE" ]; then
+    touch "\$LOG_FILE"
+    chmod 644 "\$LOG_FILE"  # 设置适当的权限
+fi
 
 # 动态检测网络接口
 INTERFACE=\$(ip route | grep default | awk '{print \$5}')
@@ -38,9 +56,12 @@ INTERFACE=\$(ip route | grep default | awk '{print \$5}')
 # 获取当前月份的总流量（单位：MiB）
 total_usage=\$(vnstat -i \$INTERFACE -m | grep "\$(date +'%b')" | awk '{print \$2}' | sed 's/[^0-9]*//g')
 
-# 如果获取的流量为空，则记录错误日志并退出
+# 打印调试信息
+echo "获取的总流量: \$total_usage"
+
+# 如果获取的流量为空或不是有效的整数，则记录错误日志并退出
 if [ -z "\$total_usage" ] || ! [[ "\$total_usage" =~ ^[0-9]+$ ]]; then
-    echo "\$(date): 无法获取流量数据，请检查vnstat配置或接口名称！" >> /var/log/traffic_monitor.log
+    echo "\$(date): 无法获取流量数据，获取到的值为：\$total_usage，请检查vnstat配置或接口名称！" >> \$LOG_FILE
     exit 1
 fi
 
@@ -49,10 +70,10 @@ threshold=5000000
 
 # 判断流量是否超过流量阈值
 if [ "\$total_usage" -ge "\$threshold" ]; then
-    echo "\$(date): 总流量已超过5TB，系统即将关机！" >> /var/log/traffic_monitor.log
+    echo "\$(date): 总流量已超过5TB，系统即将关机！" >> \$LOG_FILE
     sudo shutdown -h now
 else
-    echo "\$(date): 当前总流量：\$total_usage MiB，未超过5TB" >> /var/log/traffic_monitor.log
+    echo "\$(date): 当前总流量：\$total_usage MiB，未超过5TB" >> \$LOG_FILE
 fi
 EOF
 
