@@ -54,16 +54,17 @@ fi
 INTERFACE=\$(ip route | grep default | awk '{print \$5}')
 
 # 获取当前月份的总流量（单位：MiB）
-total_usage=\$(vnstat -i \$INTERFACE -m | grep "\$(date +'%b')" | awk '{print \$2}' | sed 's/[^0-9]*//g')
+total_usage=$(vnstat -i $INTERFACE -m | grep "$(date +'%b')" | awk '{print $2}' | sed 's/[^0-9]*//g' | tr -d '[:space:]')
 
 # 打印调试信息
-echo "获取的总流量: \$total_usage"
+echo "获取的总流量: $total_usage"
 
 # 如果获取的流量为空或不是有效的整数，则记录错误日志并退出
-if [ -z "\$total_usage" ] || ! [[ "\$total_usage" =~ ^[0-9]+$ ]]; then
-    echo "\$(date): 无法获取流量数据，获取到的值为：\$total_usage，请检查vnstat配置或接口名称！" >> \$LOG_FILE
+if [ -z "$total_usage" ] || ! [[ "$total_usage" =~ ^[0-9]+$ ]]; then
+    echo "$(date): 无法获取流量数据，获取到的值为：$total_usage，请检查vnstat配置或接口名称！" >> $LOG_FILE
     exit 1
 fi
+
 
 # 将5TB转换为MiB (5TB = 5000GB = 5000000MB = 5000000 / 1.048576 MiB)
 threshold=5000000
